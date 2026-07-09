@@ -1,0 +1,92 @@
+/* ========================================================================
+   KEVIN — Custom styles
+   Extracted from KEVIN.R's inline <style> block. Loaded via
+   tags$link(rel = "stylesheet", href = "custom.css") in the UI.
+   Palette is coordinated with the bs_theme() colors in KEVIN.R:
+     #3A4555  dark blue   (primary, sidebar-bg, text)
+     #FBF1D8  cream       (sidebar-fg)
+     #729AB9  light blue  (secondary, inactive nav)
+     #6E120B  deep red    (danger, active accents, links)
+     #f5ead0  warm cream  (bg-light voter info panel)
+   ======================================================================== */
+
+/* ── Login page centering and branding ─────────────────────────────────── */
+#login-panel {
+  max-width: 380px;
+  margin: 80px auto;
+  padding: 30px;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
+}
+#login-panel .btn-primary {
+  background-color: #3A4555 !important;
+  border-color: #3A4555 !important;
+}
+
+/* ── Logo above login ──────────────────────────────────────────────────── */
+.login-logo {
+  text-align: center;
+  margin-bottom: 20px;
+}
+.login-logo img {
+  max-width: 280px;
+}
+
+/* ── Sidebar: bottom padding so content clears the progress-strip ──────── */
+.bslib-sidebar-layout > .sidebar {
+  padding-bottom: 120px;
+}
+
+/* ── Sidebar accordion styling ─────────────────────────────────────────── */
+.accordion-button:not(.collapsed) {
+  background-color: rgba(255, 255, 255, 0.1);
+  color: #6E120B;
+}
+.accordion-button {
+  color: #3A4555;
+  background-color: transparent;
+}
+
+/* ── Card headers ──────────────────────────────────────────────────────── */
+.card-header {
+  background-color: #3A4555;
+  color: #FBF1D8;
+  font-weight: 600;
+}
+
+/* ── Cards stay white ──────────────────────────────────────────────────── */
+.card {
+  background-color: #FFFFFF;
+}
+
+/* ── Nav tabs ──────────────────────────────────────────────────────────── */
+.nav-link.active {
+  color: #3A4555 !important;
+  border-bottom: 3px solid #6E120B !important;
+  font-weight: 600;
+}
+.nav-link {
+  color: #729AB9;
+}
+
+/* ── Links ─────────────────────────────────────────────────────────────── */
+a        { color: #6E120B; }
+a:hover  { color: #3A4555; }
+
+/* ── Voter info left panel ─────────────────────────────────────────────── */
+.bg-light {
+  background-color: #f5ead0 !important;
+}
+
+/* ── Progress bar bottom strip ─────────────────────────────────────────── */
+.progress-strip {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: #3A4555;
+  padding: 8px 16px;
+  border-top: 2px solid #6E120B;
+  z-index: 1000;
+}

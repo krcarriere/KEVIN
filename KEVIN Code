@@ -1,0 +1,172 @@
+# If i update the server data, check this
+To prevent this recurring after future SCPs, set your umask before the deploy or fix mode after. Either works. The simplest is to add a post-SCP fixup line to whatever your deploy looks like:
+bashscp ServerData/kevin.sqlite kevin@67.205.173.18:/srv/shiny-server/kevin/ServerData/
+ssh kevin@67.205.173.18 "sudo chmod 664 /srv/shiny-server/kevin/ServerData/kevin.sqlite"
+Or have SCP preserve target permissions instead of source via a wrapper, but the chmod approach is more explicit and easier to read later.
+
+
+# Douglas Weiker
+# Owner of Rhode Island Slate Roofing  https://rislateroofing.com/contact.php Wife is Heather, not registered. Daughter, Kori, is NS Grad '26 Did her senior project on promoting a blood drive at school w/ RI Blood Center.
+
+# Logins
+rcaron --> [firstCat]1! 
+nsdem -> nsdem
+
+##### BASICS
+CONTROL + C seems to be an exit command generally.
+
+####### CONNECT TO SERVER #####
+# REQUIRES PPG# 
+ssh kevin@67.205.173.18
+
+######## SEND FILES TO SERVER FROM LOCAL #####
+##### FIRST, CD TO THE FOLDER #####
+# a — archive mode; preserves permissions, timestamps, symlinks, owner, group. The most useful catch-all flag
+# v — verbose; prints what's being transferred
+# z — compress during transfer; saves bandwidth
+
+cd ~/dev/KEVIN
+rsync -avz app.R kevin@67.205.173.18:/srv/shiny-server/kevin/app.R
+# REQUIRES PGG# 
+
+######## RESET SERVER  ######
+# This will restart *everything* , useful if im updating deep-in stuff (rare - but .conf). This is done inside of server.
+sudo systemctl restart shiny-server
+
+######## RESET SHINY APP #######
+# This will update the specific app, this is done on my local connection.
+ssh kevin@67.205.173.18 touch /srv/shiny-server/kevin/restart.txt
+
+########################################
+# This tells me where the crash is
+sudo tail -f /var/log/shiny-server/kevin-*.log
+# CTRL+C TO EXIT
+
+
+####### CONNECT TO SQLITE
+sqlite3 /srv/shiny-server/kevin/ServerData/kevin.sqlite
+
+
+
+
+
+
+
+# REQUIRES PGG# OR SUDO?
+
+##### REFRESH OAUTH-2 #######
+sudo systemctl restart oauth2-proxy
+
+
+###### ADD NEW USERS VIA ADDING EMAILS #####
+# Connected to server 
+sudo nano /etc/oauth2-proxy/emails.txt
+
+######## SHINY SERVER CONFIG
+cd /etc/shiny-server/
+sudo nano shiny-server.conf
+
+
+
+
+
+
+#Syncing local to server
+rsync -av --checksum --no-times \
+  --exclude '.DS_Store' \
+  --exclude '.Rhistory' \
+  --exclude 'ServerData/*.sqlite' \
+  --exclude 'ServerData/*.sqlite-wal' \
+  --exclude 'ServerData/*.sqlite-shm' \
+  --exclude 'Backups/' \
+  ~/dev/KEVIN/ \
+  kevin@67.205.173.18:/srv/shiny-server/kevin/
+
+
+
+Download DB from Server to Local
+# FROM COMPUTER
+rsync -avz kevin@67.205.173.18:/srv/shiny-server/kevin/ServerData/kevin.sqlite ~/Backups/KEVIN/
+
+#gets you out of server
+exit 
+
+ #gets me to file folder
+
+# LOCAL  TO SERVER
+
+
+
+rsync -avz Modules/voter_contact_modals.R kevin@67.205.173.18:/srv/shiny-server/kevin/Modules/
+
+rsync -avz Functions/db_helpers.R kevin@67.205.173.18:/srv/shiny-server/kevin/Functions/
+
+rsync -avz app.R kevin@67.205.173.18:/srv/shiny-server/kevin/
+
+
+rsync -avz ServerData/kevin.sqlite kevin@67.205.173.18:/srv/shiny-server/kevin/ServerData/kevin.sqlite
+
+
+rsync -avz Modules/voter_contact_modals.R kevin@67.205.173.18:/srv/shiny-server/kevin/Modules/
+rsync -avz Functions/dtc.R kevin@67.205.173.18:/srv/shiny-server/kevin/Functions/dtc.R
+rsync -avz Modules/canvassing_scripts.R kevin@67.205.173.18:/srv/shiny-server/kevin/Modules/canvassing_scripts.R
+rsync -avz Modules/password_management.R kevin@67.205.173.18:/srv/shiny-server/kevin/Modules/password_management.R
+rsync -avz app.R kevin@67.205.173.18:/srv/shiny-server/kevin/app.R
+
+rsync -avz Functions/config.R kevin@67.205.173.18:/srv/shiny-server/kevin/Functions/config.R
+rsync -avz Functions/db_helpers.R kevin@67.205.173.18:/srv/shiny-server/kevin/Functions/db_helpers.R
+
+
+rsync -avz config.R kevin@67.205.173.18:/srv/shiny-server/kevin/Functions/
+
+rsync -avz Modules/voter_contact_modals.R kevin@67.205.173.18:/srv/shiny-server/kevin/Modules/
+rsync -avz Modules/voter_list_voterbase.R kevin@67.205.173.18:/srv/shiny-server/kevin/Modules/
+
+rsync -avz ~/dev/KEVIN/app.R kevin@67.205.173.18:/srv/shiny-server/kevin
+
+rsync -avz variables_included.R kevin@67.205.173.18:/srv/shiny-server/kevin/Functions
+
+
+
+
+
+# THIS GETS TO DB
+sqlite3 /srv/shiny-server/kevin/ServerData/kevin.sqlite
+
+
+cp /srv/shiny-server/kevin/ServerData/kevin.sqlite ~/kevin_pre_wipe_$(date +%F).sqlite
+
+
+
+rsync -avz --exclude 'ServerData/' --exclude '.git/' \
+  /Users/kcarriere/dev/KEVIN/ kevin@67.205.173.18:/srv/shiny-server/kevin/
+
+
+
+
+
+
+
+
+
+# TODO: voterbase Mode could grow to include Concerns and Additional 
+# columns (see git history for the old support_list logic — had useful
+# mapply for resolving "Other" concerns and sapply for additional notes).
+
+
+# Wipe Test Data Code
+# dbGetQuery(con2, "SELECT voter_id, first_name FROM voters WHERE LENGTH(voter_id) <= 5 ORDER BY voter_id")
+# dbGetQuery(con2, "SELECT COUNT(*) FROM new_contacts")
+# dbGetQuery(con2, "SELECT COUNT(*) FROM voters WHERE LENGTH(voter_id) <= 5")
+# dbGetQuery(con2, "SELECT COUNT(*) FROM contacts WHERE LENGTH(voter_id) <= 5")
+# Delete
+# dbExecute(con2, "DELETE FROM contacts WHERE LENGTH(voter_id) <= 5")
+# dbExecute(con2, "DELETE FROM new_contacts")
+# dbExecute(con2, "DELETE FROM voters WHERE LENGTH(voter_id) <= 5")
+# Verify
+# dbGetQuery(con2, "SELECT COUNT(*) FROM new_contacts")
+# dbGetQuery(con2, "SELECT COUNT(*) FROM voters WHERE LENGTH(voter_id) <= 5")
+# dbGetQuery(con2, "SELECT COUNT(*) FROM contacts WHERE LENGTH(voter_id) <= 5")
+
+#setwd("~/dev/KEVIN")
+
