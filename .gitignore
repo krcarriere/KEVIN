@@ -1,0 +1,33 @@
+### macOS
+# Finder metadata
+.DS_Store
+
+# Thumbnails
+._*
+
+# Custom folder icons
+Icon
+
+# Volume root files
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+# SQLite database and its WAL/SHM sidecar files - live data, never commit
+ServerData/kevin.sqlite
+ServerData/kevin.sqlite-shm
+ServerData/kevin.sqlite-wal
+ServerData/*.sqlite
+ServerData/*.sqlite-shm
+ServerData/*.sqlite-wal
+
+# R environment/session junk
+.Rhistory
+.Rdata
+.Rproj.user/
+
+# rsync exclude file - local deploy config, not code
+.rsync-exclude

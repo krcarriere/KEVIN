@@ -37,14 +37,15 @@ voterListVoterBaseFiltersUI <- function(id) {
       icon = bsicons::bs_icon("hand-thumbs-up"),
       shiny::checkboxGroupInput(
         ns("support"), NULL,
-        choices = c("Unknocked"                       = "unknown",
-                    "1 \u2013 Strong Support"         = "1",
+        # "3" (no opinion) and unrated/"unknown" voters are intentionally
+        # never offered here — Voter Base view is restricted to voters
+        # with a clear lean either way. See filtered_display() below,
+        # which also hard-enforces this regardless of input$support.
+        choices = c("1 \u2013 Strong Support"         = "1",
                     "2 \u2013 Lean Support"           = "2",
-                    "3 \u2013 Und / Lean Support"     = "3",
                     "4 \u2013 Und / Lean Oppose"      = "4",
-                    "5 \u2013 Lean Oppose"            = "5",
-                    "6 \u2013 Strong Oppose"          = "6"),
-        selected = c("unknown", "1", "2", "3", "4", "5", "6")
+                    "5 \u2013 Lean Oppose"            = "5"),
+        selected = c("1", "2", "4", "5")
       )
     ),
     
@@ -159,15 +160,26 @@ voterListVoterBaseServer <- function(id, con, searchable_voters,
         (Party %in% real_parties) | (include_na_party & is.na(Party))
       )
       
-      keep_support <- input$support %||% character(0)
-      include_unknown <- "unknown" %in% keep_support
-      real_support <- setdiff(keep_support, "unknown")
+      # Hard rule, not just a default: only 1/2/4/5 are ever eligible here,
+      # regardless of what input$support contains. "3" and unrated/unknown
+      # voters are never shown in Voter Base view, for anyone.
+      keep_support <- intersect(input$support %||% character(0),
+                                c("1", "2", "4", "5"))
+      v <- v |> dplyr::filter(LatestSupport %in% keep_support)
+      
+      # Hard rule: only voters who've actually been knocked (have a
+      # contacts row) are eligible — "not knocked" voters never show up
+      # here, for anyone. DTC members are the one exception, since
+      # they're already treated as pre-counted supporters everywhere
+      # else in the app even without a literal door knock.
+      contacted_ids <- voters_with_any_contact(con)
       v <- v |> dplyr::filter(
-        (LatestSupport %in% real_support) |
-          (include_unknown & (is.na(LatestSupport) | LatestSupport == ""))
+        VoterId %in% contacted_ids 
       )
       
       keep_initials <- input$who_knows %||% character(0)
+      
+      
       include_no_one <- isTRUE(input$who_knows_unknown)
       v <- v |> dplyr::filter(
         (

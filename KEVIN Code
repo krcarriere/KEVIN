@@ -1,3 +1,14 @@
+##### SQLITE CODE
+SELECT * FROM additional_info WHERE voter_id = '38000665752';
+DELETE FROM additional_info WHERE voter_id = '38000665752';
+SELECT changes();
+SELECT * FROM additional_info;
+DELETE FROM additional_info WHERE additional_info_id IN (359, 360);
+
+
+DELETE FROM contacts WHERE contact_id IN (403, 396, 388, 389,  394, 397);
+
+
 # If i update the server data, check this
 To prevent this recurring after future SCPs, set your umask before the deploy or fix mode after. Either works. The simplest is to add a post-SCP fixup line to whatever your deploy looks like:
 bashscp ServerData/kevin.sqlite kevin@67.205.173.18:/srv/shiny-server/kevin/ServerData/
@@ -95,8 +106,6 @@ exit
 
 # LOCAL  TO SERVER
 
-
-
 rsync -avz Modules/voter_contact_modals.R kevin@67.205.173.18:/srv/shiny-server/kevin/Modules/
 
 rsync -avz Functions/db_helpers.R kevin@67.205.173.18:/srv/shiny-server/kevin/Functions/
@@ -108,6 +117,10 @@ rsync -avz ServerData/kevin.sqlite kevin@67.205.173.18:/srv/shiny-server/kevin/S
 
 
 rsync -avz Modules/voter_contact_modals.R kevin@67.205.173.18:/srv/shiny-server/kevin/Modules/
+
+
+rsync -avz Modules/voter_list_voterbase.R kevin@67.205.173.18:/srv/shiny-server/kevin/Modules/
+
 rsync -avz Functions/dtc.R kevin@67.205.173.18:/srv/shiny-server/kevin/Functions/dtc.R
 rsync -avz Modules/canvassing_scripts.R kevin@67.205.173.18:/srv/shiny-server/kevin/Modules/canvassing_scripts.R
 rsync -avz Modules/password_management.R kevin@67.205.173.18:/srv/shiny-server/kevin/Modules/password_management.R

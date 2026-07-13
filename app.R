@@ -267,6 +267,7 @@ ui <- page_fluid(
                 icon = bsicons::bs_icon("signpost-split"),
                 selectInput("precinct", "What Precinct?", choices = NULL),
                 selectInput("route_num", "What Route?", choices = NULL),
+                uiOutput("print_route_link"),
                 actionButton("go_route", "Search", class = "btn-primary w-100 mt-2")
               ),
               
@@ -735,6 +736,27 @@ server <- function(input, output, session) {
   current_stop <- reactiveVal(1L)
   form_phase  <- reactiveVal(1L)
   data_refresh <- reactiveVal(0)
+  
+  # Defensive reset: whenever we move to a different stop, blank out the
+  # conversation-dependent inputs (had_conversation, support_rating,
+  # concern1-3 and their "Other" text). These widgets only get re-rendered
+  # by voter_info_panel when a stop's Phase 3 is actually reached — if the
+  # next stop skips straight to Phase 4 (no answer / no conversation), the
+  # previous stop's stale selections would otherwise still be sitting in
+  # the browser's input bindings. do_save() already gates on full_convo so
+  # this can't leak into the DB, but resetting here keeps the UI itself
+  # from ever showing a prior stop's picks.
+  observeEvent(current_stop(), {
+    updateRadioButtons(session, "had_conversation", selected = character(0))
+    updateSelectInput(session, "support_rating", selected = "")
+    updateSelectInput(session, "concern1", selected = "(none)")
+    updateSelectInput(session, "concern2", selected = "(none)")
+    updateSelectInput(session, "concern3", selected = "(none)")
+    updateTextInput(session, "concern1_other", value = "")
+    updateTextInput(session, "concern2_other", value = "")
+    updateTextInput(session, "concern3_other", value = "")
+    updateTextInput(session, "contact_addl", value = "")
+  }, ignoreInit = TRUE)
   
   # Joined voter+route data for the selected scenario
   # This is the key workhorse. 
@@ -1485,6 +1507,16 @@ server <- function(input, output, session) {
                   "\U0001F4E6")
       ))
     }
+    
+    material_left <- voter_left_material_since(con, vid, "2026-07-07")
+    if (material_left) {
+      name_elements <- c(name_elements, list(
+        tags$span(class = "ms-2", style = "color: #6E120B;",
+                  title = "Left material on or after July 7th",
+                  bsicons::bs_icon("file-earmark-check"))
+      ))
+    }
+    
     # Pipeline-owned notes (baked in, never touched by the app)
     pipeline_addl <- if (!is.null(v$Additional) && !is.na(v$Additional) && v$Additional != "") v$Additional else ""
     # Canvasser-added notes (live from additional_info table)
@@ -1644,6 +1676,36 @@ server <- function(input, output, session) {
                        credentials  = credentials,
                        con          = con
   )
+  
+  # Mirrors sanitize() in split_canvass_pdf.py so filenames match exactly
+  sanitize_route_name <- function(name) {
+    trimws(gsub('[\\\\/:*?"<>|]', "-", name))
+  }
+  
+  output$print_route_link <- renderUI({
+    req(input$scenario, input$precinct, input$route_num)
+    
+    rn <- routes_raw %>%
+      filter(Scenario == input$scenario,
+             as.character(Precinct) == input$precinct,
+             as.character(Route) == input$route_num) %>%
+      pull(RouteName) %>%
+      unique()
+    
+    if (length(rn) == 0) return(NULL)
+    
+    fname <- paste0(input$scenario, "_P", input$precinct, "_",
+                    sanitize_route_name(rn[1]), ".pdf")
+    fpath <- file.path("www", "canvass_pdfs", fname)
+    
+    if (file.exists(fpath)) {
+      tags$a(href = file.path("canvass_pdfs", utils::URLencode(fname)), target = "_blank",
+             class = "btn btn-outline-secondary btn-sm w-100 mt-1",
+             bsicons::bs_icon("printer"), " Print this route")
+    } else {
+      tags$small(class = "text-muted", "No printable sheet for this route yet.")
+    }
+  })
   
   output$canvass_form <- renderUI({
     v <- current_voter()
@@ -1963,22 +2025,10 @@ server <- function(input, output, session) {
       validators$had_conversation_choice
     )
     
-    support_rating_val <- validate_choice(
-      input$support_rating,
-      validators$support_rating_choice
-    )
-    concern1_val <- validate_choice(
-      input$concern1,
-      validators$concern1_choice
-    )
-    concern2_val <- validate_choice(
-      input$concern2,
-      validators$concern2_choice
-    )
-    concern3_val <- validate_choice(
-      input$concern3,
-      validators$concern3_choice
-    )
+    support_rating_val <- if (full_convo) validate_choice(input$support_rating, validators$support_rating_choice) else NA_character_
+    concern1_val <- if (full_convo) validate_choice(input$concern1, validators$concern1_choice) else NA_character_
+    concern2_val <- if (full_convo) validate_choice(input$concern2, validators$concern2_choice) else NA_character_
+    concern3_val <- if (full_convo) validate_choice(input$concern3, validators$concern3_choice) else NA_character_
     
     # Build the named list of optional fields; insert_contact filters to
     # schema-allowed columns and converts "" → NA for us.

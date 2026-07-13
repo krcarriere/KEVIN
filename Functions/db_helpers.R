@@ -161,6 +161,16 @@ flag_may_have_moved <- function(con, voter_ids) {
   invisible(TRUE)
 }
 
+voter_left_material_since <- function(con, vid, cutoff_date = "2026-07-07") {
+  n <- tbl(con, "contacts") |>
+    filter(voter_id == !!as.character(vid),
+           left_material == "Yes",
+           contact_date > !!cutoff_date) |>
+    summarise(n = n()) |>
+    pull(n)
+  isTRUE(n > 0)
+}
+
 # Record a person we met at the door who wasn't on the roll.
 # Atomic: writes new_contacts, voters stub, and a contacts row together.
 # Returns the newly allocated voter_id.
