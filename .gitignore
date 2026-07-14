@@ -23,6 +23,8 @@ ServerData/kevin.sqlite-wal
 ServerData/*.sqlite
 ServerData/*.sqlite-shm
 ServerData/*.sqlite-wal
+README.pdf
+README.html
 
 # R environment/session junk
 .Rhistory
