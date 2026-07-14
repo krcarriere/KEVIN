@@ -31,6 +31,7 @@
 
 registerVoterContactModals <- function(input, output, session,
                                        current_voter,
+                                       current_household,
                                        route_data,
                                        voter_data,
                                        data_refresh,
@@ -40,33 +41,18 @@ registerVoterContactModals <- function(input, output, session,
                                        concern_choices,
                                        user_scenarios,
                                        user_role) {
-  
+  add_info_target <- reactiveVal(NULL)
   # ── "Different Person" → list other voters at this stop ────────────────
   observeEvent(input$diff_person, {
-    v <- current_voter()
-    if (is.null(v)) return()
+    hh <- current_household()
+    if (nrow(hh) == 0) return()
     
-    rd <- route_data()
-    
-    if (nrow(rd) > 0 && !"DisplayAddress" %in% names(rd)) {
-      rd$DisplayAddress <- rd$Street
-    }
-    
-    others <- rd |>
-      dplyr::filter(Precinct  == v$Precinct,
-                    Street == v$Street,
-                    VoterId   != v$VoterId)
-    
-    if (nrow(others) > 0) {
-      name_list <- tags$ul(
-        lapply(seq_len(nrow(others)), function(i) {
-          tags$li(paste0(others$FirstName[i], " ", others$LastName[i],
-                         " (", others$Party[i], ", Age ", others$Age[i], ")"))
-        })
-      )
-    } else {
-      name_list <- tags$p(tags$em("No other registered voters at this address."))
-    }
+    name_list <- tags$ul(
+      lapply(seq_len(nrow(hh)), function(i) {
+        tags$li(paste0(hh$FirstName[i], " ", hh$LastName[i],
+                       " (", hh$Party[i], ", Age ", hh$Age[i], ")"))
+      })
+    )
     
     showModal(modalDialog(
       title = "Different person answered?",
@@ -685,9 +671,16 @@ registerVoterContactModals <- function(input, output, session,
   
   
   # ── "Add Info" modal ────────────────────────────────────────────────────
-  observeEvent(input$add_info, {
-    v <- current_voter()
-    if (is.null(v)) return()
+  observeEvent(input$add_info_click, {
+    payload <- input$add_info_click
+    vid <- if (!is.null(payload)) as.character(payload$vid) else NA_character_
+    if (is.na(vid) || !nzchar(vid)) return()
+    
+    hh <- current_household()
+    v  <- hh[as.character(hh$VoterId) == vid, , drop = FALSE]
+    if (nrow(v) == 0) return()
+    v <- v[1, ]
+    add_info_target(vid)
     
     showModal(modalDialog(
       title = paste0("Add Info: ", v$FirstName, " ", v$LastName),
@@ -764,9 +757,13 @@ registerVoterContactModals <- function(input, output, session,
   }, bg = "transparent")
   # ── Save Add Info (DB) ──────────────────────────────────────────────────
   observeEvent(input$save_addl_info, {
-    v <- current_voter()
-    if (is.null(v)) return()
-    vid <- as.character(v$VoterId)
+    vid <- add_info_target()
+    if (is.null(vid) || !nzchar(vid)) return()
+    
+    hh <- current_household()
+    v  <- hh[as.character(hh$VoterId) == vid, , drop = FALSE]
+    if (nrow(v) == 0) return()
+    v <- v[1, ]
     
     user    <- tolower(credentials()$info$user)
     initial <- who_initials[user] %||% toupper(substr(user, 1, 1))
@@ -820,7 +817,7 @@ registerVoterContactModals <- function(input, output, session,
     }
     
     data_refresh(data_refresh() + 1)
-    
+    add_info_target(NULL)
     removeModal()
     showNotification("Info saved!", type = "message")
   })
