@@ -738,6 +738,9 @@ server <- function(input, output, session) {
   current_stop <- reactiveVal(1L)
   form_phase  <- reactiveVal(1L)
   data_refresh <- reactiveVal(0)
+  talked_to_ids    <- reactiveVal(NULL)   # NULL = not chosen yet; character vector once chosen
+  person_queue_idx <- reactiveVal(1L)     # position within talked_to_ids being answered
+  person_answers   <- reactiveVal(list()) # vid -> list(support_rating, concern1-3, concern1-3_other, contact_addl)
   
   # Defensive reset: whenever we move to a different stop, blank out the
   # conversation-dependent inputs (had_conversation, support_rating,
@@ -758,6 +761,9 @@ server <- function(input, output, session) {
     updateTextInput(session, "concern2_other", value = "")
     updateTextInput(session, "concern3_other", value = "")
     updateTextInput(session, "contact_addl", value = "")
+    talked_to_ids(NULL)
+    person_queue_idx(1L)
+    person_answers(list())
   }, ignoreInit = TRUE)
   
   # Joined voter+route data for the selected scenario
@@ -1572,7 +1578,8 @@ server <- function(input, output, session) {
         
         prev_line <- tags$span(
           style = "font-size: 0.85em; color: #666;",
-          if (saved_support != "") tagList(tags$em("Last support: "), saved_support, " ") else NULL,
+          if (saved_support != "") tagList(tags$em("Last support: "), saved_support, "") else NULL,
+          if (saved_support != "" && nzchar(concerns_display)) tags$br() else NULL,
           if (nzchar(concerns_display)) tagList(tags$em("Concerns: "), concerns_display) else NULL
         )
       }
@@ -1743,10 +1750,10 @@ server <- function(input, output, session) {
       return(tagList(
         method_toggle,
         campaigner_input,
-        radioButtons("were_there", "Were they there?",
+        radioButtons("were_there", "Was anyone home?",
                      choices = c("Yes", "No"),
                      selected = saved_were_there, inline = TRUE),
-        radioButtons("left_material", "Left material?",
+        radioButtons("left_material", "Did you leave campaign material?",
                      choices = c("Yes", "No"),
                      selected = saved_left_mat, inline = TRUE),
         tags$hr(),
@@ -1777,14 +1784,61 @@ server <- function(input, output, session) {
     
     # ── PHASE 3: had conversation → support + concerns ───────────────────
     if (phase == 3L) {
+      hh  <- current_household()
+      tid <- talked_to_ids()
+      
+      # ── Who did you talk to? (only when >1 person and not yet chosen) ──
+      if (nrow(hh) > 1 && is.null(tid)) {
+        choices <- setNames(as.character(hh$VoterId), hh$Name)
+        return(tagList(
+          tags$p(class = "text-muted",
+                 paste0("\u2713 ", campaigner_resolved(),
+                        " | Material: ", input$left_material,
+                        " | Anyone home: Y | Conversation: Y")),
+          tags$hr(),
+          checkboxGroupInput("talked_to_select", "Who did you talk to?", choices = choices),
+          tags$hr(),
+          layout_columns(
+            col_widths = c(4, 8),
+            actionButton("phase3_back", "\u25C0 Back", class = "btn-outline-secondary w-100"),
+            actionButton("confirm_talked_to", "Continue \u25B6", class = "btn-primary w-100")
+          )
+        ))
+      }
+      
+      # ── Per-person support/concerns card ────────────────────────────────
+      qi <- person_queue_idx()
+      if (is.null(tid) || qi < 1 || qi > length(tid)) {
+        return(tags$p("Nothing to show \u2014 go back and try again."))
+      }
+      
+      cur_vid    <- tid[qi]
+      cur_person <- hh[as.character(hh$VoterId) == cur_vid, , drop = FALSE][1, ]
+      
+      stashed         <- person_answers()[[cur_vid]]
+      cur_latest      <- latest_contact(con, cur_vid)
+      has_cur_contact <- nrow(cur_latest) > 0
+      lvp <- function(field, fallback = NA_character_) {
+        if (!has_cur_contact) return(fallback)
+        val <- cur_latest[[field]]
+        if (is.null(val) || length(val) == 0 || is.na(val) || !nzchar(val)) fallback else as.character(val)
+      }
+      
+      p_support <- stashed$support_rating %||% lvp("support_rating", character(0))
+      p_c1      <- stashed$concern1       %||% lvp("concern1", "(none)")
+      p_c1o     <- stashed$concern1_other %||% lvp("concern1_other", "")
+      p_c2      <- stashed$concern2       %||% lvp("concern2", "(none)")
+      p_c2o     <- stashed$concern2_other %||% lvp("concern2_other", "")
+      p_c3      <- stashed$concern3       %||% lvp("concern3", "(none)")
+      p_c3o     <- stashed$concern3_other %||% lvp("concern3_other", "")
+      p_addl    <- stashed$contact_addl %||% ""
+      
+      progress_note <- if (length(tid) > 1) paste0(" (", qi, " of ", length(tid), ")") else ""
+      
       return(tagList(
-        tags$p(class = "text-muted",
-               paste0("\u2713 ",
-                      campaigner_resolved(),
-                      " | Material: ", input$left_material,
-                      " | There: Y | Conversation: Y")),
+        tags$p(class = "text-muted", paste0("\u2713 Talking to: ", cur_person$Name, progress_note)),
         tags$hr(),
-        selectInput("support_rating", "How supportive?",
+        selectInput("support_rating", paste0("How supportive was ", cur_person$Name, "?"),
                     choices = c(
                       "Select..." = "",
                       "1 \u2013 You have my vote" = "1",
@@ -1792,51 +1846,57 @@ server <- function(input, output, session) {
                       "3 \u2013 No opinion" = "3",
                       "4 \u2013 Lean against" = "4",
                       "5 \u2013 Strongly against" = "5"),
-                    selected = saved_support),
+                    selected = p_support),
         tags$hr(),
-        tags$strong("Top 3 Concerns"),
-        selectInput("concern1", "Concern #1", choices = concern_choices,
-                    selected = saved_c1, width = "100%"),
+        selectInput("concern1", paste0(cur_person$Name, "'s #1 Concern"), choices = concern_choices, selected = p_c1, width = "100%"),
         uiOutput("concern1_other_ui"),
-        
-        selectInput("concern2", "Concern #2", choices = concern_choices,
-                    selected = saved_c2, width = "100%"),
+        selectInput("concern2", paste0(cur_person$Name, "'s #2 Concern"), choices = concern_choices, selected = p_c2, width = "100%"),
         uiOutput("concern2_other_ui"),
-        
-        selectInput("concern3", "Concern #3", choices = concern_choices,
-                    selected = saved_c3, width = "100%"),
+        selectInput("concern3", paste0(cur_person$Name, "'s #3 Concern"), choices = concern_choices, selected = p_c3, width = "100%"),
         uiOutput("concern3_other_ui"),
         tags$hr(),
         textInput("contact_addl", "Additional information?",
-                  value = "", width = "100%",
+                  value = p_addl, width = "100%",
                   placeholder = "for context on choices; or other."),
         tags$hr(),
         layout_columns(
-          col_widths = c(4, 4, 4),
+          col_widths = c(4, 8),
           actionButton("phase3_back", "\u25C0 Back", class = "btn-outline-secondary w-100"),
-          actionButton("save_contact", "\U0001F4BE Save Contact", class = "btn-success w-100"),
-          actionButton("save_and_next", "\U0001F4BE Save & Next \u25B6", class = "btn-primary w-100")
-        ),
-        uiOutput("save_status")
+          actionButton("person_next", "Continue \u25B6", class = "btn-primary w-100")
+        )
       ))
     }
     
     # ── PHASE 4: they weren't there / no conversation → just save ────────
     if (phase == 4L) {
-      campaign_text <- if (!is.null(campaigner_resolved())) paste0(input$campaigner, " | ") else ""
-      summary_text <- paste0("\u2713 ",
-                             campaign_text,
-                             " | Material: ",
-                             input$left_material,
-                             " | There: ", input$were_there)
+      hh  <- current_household()
+      tid <- talked_to_ids()
+      
+      campaign_text <- if (!is.null(campaigner_resolved())) paste0(campaigner_resolved(), " | ") else ""
+      summary_text <- paste0("\u2713 ", campaign_text,
+                             "Material: ", input$left_material,
+                             " | Anyone home: ", input$were_there)
       if (!is.null(input$were_there) && input$were_there == "Yes") {
-        summary_text <- paste0(summary_text, " | Conversation: No")
+        summary_text <- paste0(summary_text, " | Conversation: ",
+                               if (!is.null(tid) && length(tid) > 0) "Yes" else "No")
       }
-      # Figure out where Back should go: phase 2 if they were there, phase 1 if not
+      
+      roster_lines <- if (!is.null(tid) && length(tid) > 0) {
+        tagList(
+          tags$p(tags$strong("Talked to: "),
+                 paste(hh$Name[as.character(hh$VoterId) %in% tid], collapse = ", ")),
+          if (nrow(hh) > length(tid)) {
+            tags$p(tags$strong("Home, no direct conversation: "),
+                   paste(hh$Name[!as.character(hh$VoterId) %in% tid], collapse = ", "))
+          }
+        )
+      } else NULL
+      
       return(tagList(
         tags$p(class = "text-muted", summary_text),
+        roster_lines,
         tags$hr(),
-        tags$p("Ready to save this stop."),
+        tags$p("Ready to save this stop \u2014 this records a contact for everyone at this address."),
         layout_columns(
           col_widths = c(4, 4, 4),
           actionButton("phase4_back", "\u25C0 Back", class = "btn-outline-secondary w-100"),
@@ -1862,17 +1922,79 @@ server <- function(input, output, session) {
   
   observeEvent(input$phase2_next, {
     if (!is.null(input$had_conversation) && input$had_conversation == "Yes") {
+      hh <- current_household()
+      if (nrow(hh) <= 1) {
+        talked_to_ids(as.character(hh$VoterId))
+      } else {
+        talked_to_ids(NULL)
+      }
+      person_queue_idx(1L)
+      person_answers(list())
       form_phase(3L)
     } else {
       form_phase(4L)
     }
   })
   
-  observeEvent(input$phase3_back, { form_phase(2L) })
+  observeEvent(input$confirm_talked_to, {
+    sel <- input$talked_to_select
+    if (is.null(sel) || length(sel) == 0) {
+      showNotification("Select at least one person.", type = "error")
+      return()
+    }
+    talked_to_ids(sel)
+    person_queue_idx(1L)
+  })
+  
+  observeEvent(input$person_next, {
+    tid <- talked_to_ids()
+    if (is.null(tid)) return()
+    qi <- person_queue_idx()
+    if (qi < 1 || qi > length(tid)) return()
+    cur_vid <- tid[qi]
+    
+    ans <- person_answers()
+    ans[[cur_vid]] <- list(
+      support_rating = input$support_rating,
+      concern1       = input$concern1,
+      concern1_other = input$concern1_other,
+      concern2       = input$concern2,
+      concern2_other = input$concern2_other,
+      concern3       = input$concern3,
+      concern3_other = input$concern3_other,
+      contact_addl   = input$contact_addl
+    )
+    person_answers(ans)
+    
+    if (qi < length(tid)) {
+      person_queue_idx(qi + 1L)
+    } else {
+      form_phase(4L)
+    }
+  })
+  
+  observeEvent(input$phase3_back, {
+    tid <- talked_to_ids()
+    hh  <- current_household()
+    qi  <- person_queue_idx()
+    
+    if (!is.null(tid) && qi > 1) {
+      person_queue_idx(qi - 1L)          # previous person's card
+    } else if (!is.null(tid) && nrow(hh) > 1) {
+      talked_to_ids(NULL)                # back to the picker
+    } else {
+      form_phase(2L)                     # out of phase 3 entirely
+    }
+  })
+  
   
   observeEvent(input$phase4_back, {
-    # Go back to where they came from: phase 2 if they were there, phase 1 if not
-    if (!is.null(input$were_there) && input$were_there == "Yes") {
+    tid <- talked_to_ids()
+    if (!is.null(tid) && length(tid) > 0 &&
+        !is.null(input$had_conversation) && input$had_conversation == "Yes") {
+      person_queue_idx(length(tid))      # re-enter loop at the last person
+      form_phase(3L)
+    } else if (!is.null(input$were_there) && input$were_there == "Yes") {
       form_phase(2L)
     } else {
       form_phase(1L)
@@ -1913,14 +2035,16 @@ server <- function(input, output, session) {
   })
   
   do_save <- function() {
-    v <- current_voter()
-    if (is.null(v)) return(FALSE)
-    
-    vid <- as.character(v$VoterId)
+    hh <- current_household()
+    if (nrow(hh) == 0) return(FALSE)
     
     method <- if (is.null(input$contact_method)) "knock" else input$contact_method
+    
+    # Email path unchanged — a single logged email against current_voter().
     if (identical(method, "email")) {
-      insert_contact(con, vid,
+      v <- current_voter()
+      if (is.null(v)) return(FALSE)
+      insert_contact(con, as.character(v$VoterId),
                      input_by = credentials()$info$user,
                      fields = list(
                        campaigner   = validate_choice(campaigner_resolved(), validators$campaigner_choice),
@@ -1930,84 +2054,67 @@ server <- function(input, output, session) {
       return(TRUE)
     }
     
-    were_there <- if (!is.null(input$were_there)) input$were_there else "No"
-    had_convo  <- if (!is.null(input$had_conversation) && 
-                      were_there == "Yes") input$had_conversation else NA_character_
-    full_convo <- !is.na(had_convo) && had_convo == "Yes"
+    were_there_val     <- validate_choice(input$were_there, validators$were_they_there_choice)
+    left_material_val  <- validate_choice(input$left_material, validators$left_material_choice)
+    campaigner_val      <- validate_choice(campaigner_resolved(), validators$campaigner_choice)
     
-    # See db_helpers validate_choice()
-    # if (is.null(input_value)) return(NA_character_)
-    # if (input_value %in% allowed) return(input_value)
-    # NA_character_
+    tid     <- talked_to_ids()
+    answers <- person_answers()
     
-    # This forces the input into what I determine, not what is provided by the user.
-    # Remember that the UI display is simply "suggestions", and an attacker can
-    # input anything they want. Thus, limit the input to my own list.
-# Claude says this is wrong, 6/29. Checking first by commenting out.
-        # campaigner_val <- validate_choice(
-    #   input$campaigner,
-    #   validators$campaigner
-    # )
-    
-    campaigner_val <- validate_choice(
-      campaigner_resolved(),
-      validators$campaigner_choice
+    for (i in seq_len(nrow(hh))) {
+      v      <- hh[i, ]
+      vid    <- as.character(v$VoterId)
+      talked <- !is.null(tid) && vid %in% tid
+      
+      if (talked) {
+        ans <- answers[[vid]] %||% list()
+        had_convo_val       <- "Yes"
+        support_rating_val  <- validate_choice(ans$support_rating, validators$support_rating_choice)
+        concern1_val        <- validate_choice(ans$concern1, validators$concern1_choice)
+        concern2_val        <- validate_choice(ans$concern2, validators$concern2_choice)
+        concern3_val        <- validate_choice(ans$concern3, validators$concern3_choice)
+        concern1_other_val  <- if (identical(ans$concern1, "Other") && !is.null(ans$concern1_other)) sanitize_user_input(ans$concern1_other) else NA_character_
+        concern2_other_val  <- if (identical(ans$concern2, "Other") && !is.null(ans$concern2_other)) sanitize_user_input(ans$concern2_other) else NA_character_
+        concern3_other_val  <- if (identical(ans$concern3, "Other") && !is.null(ans$concern3_other)) sanitize_user_input(ans$concern3_other) else NA_character_
+        addl_text           <- if (!is.null(ans$contact_addl)) trimws(ans$contact_addl) else ""
+      } else {
+        had_convo_val <- if (!is.null(input$were_there) && input$were_there == "Yes") "No" else NA_character_
+        support_rating_val <- NA_character_
+        concern1_val <- NA_character_; concern1_other_val <- NA_character_
+        concern2_val <- NA_character_; concern2_other_val <- NA_character_
+        concern3_val <- NA_character_; concern3_other_val <- NA_character_
+        addl_text <- ""
+      }
+      
+      fields <- list(
+        campaigner       = campaigner_val,
+        contact_type     = "knock",
+        left_material    = left_material_val,
+        were_they_there  = were_there_val,
+        had_conversation = had_convo_val,
+        support_rating   = support_rating_val,
+        concern1         = concern1_val,
+        concern2         = concern2_val,
+        concern3         = concern3_val,
+        concern1_other   = concern1_other_val,
+        concern2_other   = concern2_other_val,
+        concern3_other   = concern3_other_val
       )
-    
-    left_material_val <- validate_choice(
-      input$left_material,
-      validators$left_material_choice
-    )
-    were_there_val <- validate_choice(
-      input$were_there,
-      validators$were_they_there_choice
-    )
-    
-    had_convo_val <- validate_choice(
-      had_convo,
-      validators$had_conversation_choice
-    )
-    
-    support_rating_val <- if (full_convo) validate_choice(input$support_rating, validators$support_rating_choice) else NA_character_
-    concern1_val <- if (full_convo) validate_choice(input$concern1, validators$concern1_choice) else NA_character_
-    concern2_val <- if (full_convo) validate_choice(input$concern2, validators$concern2_choice) else NA_character_
-    concern3_val <- if (full_convo) validate_choice(input$concern3, validators$concern3_choice) else NA_character_
-    
-    # Build the named list of optional fields; insert_contact filters to
-    # schema-allowed columns and converts "" → NA for us.
-    fields <- list(
-      campaigner       = campaigner_val,
-      contact_type     = "knock",
-      left_material    = left_material_val,
-      were_they_there  = were_there_val,
-      had_conversation = had_convo_val,
-      support_rating   = support_rating_val,
-      concern1         = concern1_val,
-      concern2         = concern2_val,
-      concern3         = concern3_val,
-      concern1_other   = if (full_convo && !is.null(input$concern1) && identical(input$concern1, "Other")) sanitize_user_input(input$concern1_other) else NA_character_,
-      concern2_other   = if (full_convo && !is.null(input$concern2) && identical(input$concern2, "Other")) sanitize_user_input(input$concern2_other) else NA_character_,
-      concern3_other   = if (full_convo && !is.null(input$concern3) && identical(input$concern3, "Other")) sanitize_user_input(input$concern3_other) else NA_character_
-    )
-    
-    insert_contact(con, vid,
-                   input_by = credentials()$info$user,
-                   fields   = fields)
-    
-    # conversation isn't the canvasser personally knowing the voter.
-    addl_text <- if (is.null(input$contact_addl)) "" else trimws(input$contact_addl)
-    if (full_convo && nzchar(addl_text)) {
-      insert_additional_info(
-        con,
-        vid             = vid,
-        who_knows       = NA_character_,
-        additional_text = sanitize_user_input(addl_text),
-        updated_by      = credentials()$info$user
-      )
+      
+      insert_contact(con, vid, input_by = credentials()$info$user, fields = fields)
+      
+      if (talked && nzchar(addl_text)) {
+        insert_additional_info(
+          con,
+          vid             = vid,
+          who_knows       = NA_character_,
+          additional_text = sanitize_user_input(addl_text),
+          updated_by      = credentials()$info$user
+        )
+      }
     }
     
     data_refresh(data_refresh() + 1)
-    
     TRUE
   }
   
@@ -2022,7 +2129,7 @@ server <- function(input, output, session) {
   
   observeEvent(input$save_and_next, {
     if (do_save()) {
-      if (current_stop() < nrow(route_data())) {
+      if (current_stop() < length(stop_orders())) {
         current_stop(current_stop() + 1L)
         form_phase(1L)
       }
