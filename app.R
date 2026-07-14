@@ -1460,233 +1460,143 @@ server <- function(input, output, session) {
   # ── Voter info panel ──────────────────────────────────────────────────
   
   output$voter_info_panel <- renderUI({
-    v <- current_voter()
-    if (is.null(v)) return(tags$p("No route loaded."))
+    hh <- current_household()
+    if (nrow(hh) == 0) return(tags$p("No route loaded."))
     
-    vid <- as.character(v$VoterId)
     data_refresh()  # re-evaluate when a save bumps this
-    latest <- latest_contact(con, vid)
-    saved_ts      <- if (nrow(latest) > 0) latest$contact_timestamp else NA_character_
-    already_saved <- !is.na(saved_ts) && nzchar(saved_ts)
     
-    # Build name line with optional badges
-    name_elements <- list(tags$strong(v$Name))
+    # House-level facts — taken from the first row since these describe
+    # the address, not a specific person.
+    v1 <- hh[1, ]
     
-    who <- if (!is.null(v$WhoKnows) && !is.na(v$WhoKnows) && v$WhoKnows != "") v$WhoKnows else ""
-    if (who != "") {
-      name_elements <- c(name_elements, list(
-        tags$span(class = "badge ms-2", 
-                  style = "background-color: #6E120B; color: #FFFFFF;", 
-                  who)
-      ))
-    }
-    
-    donate <- if (!is.null(v$DonateText) && !is.na(v$DonateText) && v$DonateText != "") v$DonateText else ""
-    if (donate != "") {
-      name_elements <- c(name_elements, list(
-        tags$span(class = "ms-2", style = "color: #6E120B;", "\U0001F4B2")
-      ))
-    }
-    
-    Gender <- if (!is.null(v$Gender) && !is.na(v$Gender) && v$Gender != "") v$Gender else ""
-    if (Gender %in% c("M", "F")) {
-      
-      icon <- if (Gender == "M") {
-        bsicons::bs_icon("gender-male")
+    # ── Per-person line: name + icons + age/party/VS + last-contact ──────
+    build_person_line <- function(v) {
+      vid <- as.character(v$VoterId)
+      is_off_target <- isTRUE(!v$OnTargetList)
+      line_style <- if (is_off_target) {
+        "padding: 0.4rem; border-radius: 0.4rem; background-color: #FFF8E1; border-left: 3px solid #D4A017;"
       } else {
-        bsicons::bs_icon("gender-female")
+        "padding: 0.4rem 0;"
+      }
+      off_target_note <- if (is_off_target) {
+        tags$span(style = "font-size: 0.8em; color: #8B6F00;", tags$em("(Off Route)"))
+      } else NULL
+      name_elements <- list(tags$strong(v$Name))
+      
+      who <- if (!is.null(v$WhoKnows) && !is.na(v$WhoKnows) && v$WhoKnows != "") v$WhoKnows else ""
+      if (who != "") {
+        name_elements <- c(name_elements, list(
+          tags$span(class = "badge ms-2",
+                    style = "background-color: #6E120B; color: #FFFFFF;", who)
+        ))
       }
       
-      name_elements <- c(name_elements, list(
-        tags$span(
-          class = "ms-2",
-          style = "color: #6E120B;",
-          icon
+      donate <- if (!is.null(v$DonateText) && !is.na(v$DonateText) && v$DonateText != "") v$DonateText else ""
+      if (donate != "") {
+        name_elements <- c(name_elements, list(
+          tags$span(class = "ms-2", style = "color: #6E120B;", "\U0001F4B2")
+        ))
+      }
+      
+      Gender <- if (!is.null(v$Gender) && !is.na(v$Gender) && v$Gender != "") v$Gender else ""
+      if (Gender %in% c("M", "F")) {
+        icon <- if (Gender == "M") bsicons::bs_icon("gender-male") else bsicons::bs_icon("gender-female")
+        name_elements <- c(name_elements, list(tags$span(class = "ms-2", style = "color: #6E120B;", icon)))
+      }
+      
+      bond <- if (!is.null(v$nsse_2026_voter) && !is.na(v$nsse_2026_voter) &&
+                  v$nsse_2026_voter == "Yes") TRUE else FALSE
+      if (bond) {
+        name_elements <- c(name_elements, list(
+          tags$span(class = "ms-2", title = "NSSE 2026 Voter", "\U0001F694")
+        ))
+      }
+      
+      spoken <- if (!is.null(v$TimesSpoken) && !is.na(v$TimesSpoken) && v$TimesSpoken > 0) v$TimesSpoken else 0
+      if (spoken > 0) {
+        name_elements <- c(name_elements, list(tags$span(class = "ms-2", "\U0001F3A4")))
+      }
+      
+      inactive <- if (!is.null(v$VoterStatus) && !is.na(v$VoterStatus) && v$VoterStatus == "Inactive") TRUE else FALSE
+      if (inactive) {
+        name_elements <- c(name_elements, list(
+          tags$span(class = "ms-2", style = "color: #6E120B;", bsicons::bs_icon("exclamation-triangle-fill"))
+        ))
+      }
+      
+      may_moved <- if (!is.null(v$MayHaveMoved) && !is.na(v$MayHaveMoved) && v$MayHaveMoved == 1) TRUE else FALSE
+      if (may_moved) {
+        name_elements <- c(name_elements, list(
+          tags$span(class = "ms-2", title = "May have moved — a new contact was recorded here", "\U0001F4E6")
+        ))
+      }
+      
+      material_left <- voter_left_material_since(con, vid, "2026-07-07")
+      if (material_left) {
+        name_elements <- c(name_elements, list(
+          tags$span(class = "ms-2", style = "color: #6E120B;",
+                    title = "Left material on or after July 7th",
+                    bsicons::bs_icon("file-earmark-check"))
+        ))
+      }
+      
+      party_display <- dplyr::case_when(
+        v$Party == "U" ~ "Ind",
+        v$Party == "R" ~ "Rep",
+        v$Party == "D" ~ "Dem",
+        is.na(v$Party) ~ "Unk",
+        TRUE ~ v$Party
+      )
+      
+      latest <- latest_contact(con, vid)
+      prev_line <- NULL
+      if (nrow(latest) > 0) {
+        lv <- function(field, fallback = NA_character_) {
+          val <- latest[[field]]
+          if (is.null(val) || length(val) == 0 || is.na(val) || !nzchar(val)) fallback else as.character(val)
+        }
+        saved_support <- lv("support_rating", "")
+        saved_c1 <- lv("concern1", "(none)"); saved_c1o <- lv("concern1_other", "")
+        saved_c2 <- lv("concern2", "(none)"); saved_c2o <- lv("concern2_other", "")
+        saved_c3 <- lv("concern3", "(none)"); saved_c3o <- lv("concern3_other", "")
+        
+        resolve_concern <- function(concern, other) {
+          if (is.na(concern) || concern == "" || concern == "(none)") return(NA_character_)
+          if (concern == "Other" && !is.na(other) && nzchar(other)) return(other)
+          concern
+        }
+        concerns <- c(resolve_concern(saved_c1, saved_c1o),
+                      resolve_concern(saved_c2, saved_c2o),
+                      resolve_concern(saved_c3, saved_c3o))
+        concerns_display <- paste(concerns[!is.na(concerns)], collapse = ", ")
+        
+        prev_line <- tags$span(
+          style = "font-size: 0.85em; color: #666;",
+          if (saved_support != "") tagList(tags$em("Last support: "), saved_support, " ") else NULL,
+          if (nzchar(concerns_display)) tagList(tags$em("Concerns: "), concerns_display) else NULL
         )
-      ))
+      }
+      
+      pipeline_addl  <- if (!is.null(v$Additional) && !is.na(v$Additional) && v$Additional != "") v$Additional else ""
+      canvasser_addl <- get_additional_notes(con, vid)
+      additional <- paste(c(pipeline_addl, canvasser_addl)[nzchar(c(pipeline_addl, canvasser_addl))], collapse = " | ")
+      
+      tags$div(
+        style = paste0(line_style, " border-bottom: 1px solid #E0E0E0;"),
+        tags$p(class = "mb-1", name_elements, if (!is.null(off_target_note)) tagList(" ", off_target_note) else NULL),
+        tags$p(class = "mb-1", style = "font-size: 0.9em;",
+               paste0(v$Age, " y.o.", " | ", party_display, " | ", "VS: ", v$VoterScore)),
+        if (!is.null(prev_line)) tags$p(class = "mb-1", prev_line) else NULL,
+        if (nzchar(additional)) tags$p(class = "mb-0", style = "font-size: 0.85em; color: #444;", additional) else NULL
+      )
     }
     
-    bond <- if (!is.null(v$nsse_2026_voter) &&
-                !is.na(v$nsse_2026_voter) &&
-                v$nsse_2026_voter == "Yes") TRUE else FALSE
-    
-    if (bond) {
-      name_elements <- c(name_elements, list(
-        tags$span(class = "ms-2", title = "NSSE 2026 Voter",
-                  "\U0001F694")
-      ))
-    }
-    
-    
-    spoken <- if (!is.null(v$TimesSpoken) && !is.na(v$TimesSpoken) && v$TimesSpoken > 0) v$TimesSpoken else 0
-    if (spoken > 0) {
-      name_elements <- c(name_elements, list(
-        tags$span(class = "ms-2", "\U0001F3A4")
-      ))
-    }
-    
-    inactive <- if (!is.null(v$VoterStatus) && !is.na(v$VoterStatus) && v$VoterStatus == "Inactive") TRUE else FALSE
-    if (inactive) {
-      name_elements <- c(name_elements, list(
-        tags$span(class = "ms-2", style = "color: #6E120B;",
-                  bsicons::bs_icon("exclamation-triangle-fill"))
-      ))
-    }
-    
-    may_moved <- if (!is.null(v$MayHaveMoved) && !is.na(v$MayHaveMoved) && v$MayHaveMoved == 1) TRUE else FALSE
-    if (may_moved) {
-      name_elements <- c(name_elements, list(
-        tags$span(class = "ms-2", title = "May have moved — a new contact was recorded here",
-                  "\U0001F4E6")
-      ))
-    }
-    
-    material_left <- voter_left_material_since(con, vid, "2026-07-07")
-    if (material_left) {
-      name_elements <- c(name_elements, list(
-        tags$span(class = "ms-2", style = "color: #6E120B;",
-                  title = "Left material on or after July 7th",
-                  bsicons::bs_icon("file-earmark-check"))
-      ))
-    }
-    
-    # Pipeline-owned notes (baked in, never touched by the app)
-    pipeline_addl <- if (!is.null(v$Additional) && !is.na(v$Additional) && v$Additional != "") v$Additional else ""
-    # Canvasser-added notes (live from additional_info table)
-    canvasser_addl <- get_additional_notes(con, as.character(v$VoterId))
-    # Combine for display
-    additional <- paste(c(pipeline_addl, canvasser_addl)[nzchar(c(pipeline_addl, canvasser_addl))], collapse = " | ")
-    # Household members at the same address (other voters at this stop).
-    # Show as a single line: ": John Smith (R), Jane Smith (U)"
-    rd <- route_data()
-    housemates <- if (!is.null(v$Street) && !is.na(v$Street) && nzchar(v$Street)) {
-      rd |>
-        dplyr::filter(
-          Precinct == v$Precinct,
-          Street   == v$Street,
-          VoterId  != v$VoterId
-        )
-    } else {
-      rd[0, ]  # empty df
-    }
-    housemates_line <- if (nrow(housemates) > 0) {
-      parts <- paste0(housemates$FirstName, " ", housemates$LastName,
-                      " (", housemates$Party %||% "?", ")")
-      paste0("Others @: ", paste(parts, collapse = ", "))
-    } else ""
-    
-    # Off-target-list styling: voters who came in via address match (not
-    # the pipeline's target list). Canvasser still talks to them but 
-    # they're not the primary pitch target.
-    is_off_target <- isTRUE(!v$OnTargetList)
-    card_style <- if (is_off_target) {
-      # Muted yellow/tan background to distinguish — readable but clearly "secondary"
-      "background-color: #FFF8E1; padding: 0.75rem; border-radius: 0.5rem; border-left: 4px solid #D4A017;"
-    } else ""
-    off_target_banner <- if (is_off_target) {
-      tags$p(style = "font-size: 0.85em; color: #8B6F00; margin-bottom: 0.5em;",
-             tags$em("Not target on route."))
-    } else NULL
-    
-    party_display <- dplyr::case_when(
-      v$Party == "U" ~ "Ind",
-      v$Party == "R" ~ "Rep",
-      v$Party == "D" ~ "Dem",
-      is.na(v$Party) ~ "Unk",
-      TRUE ~ v$Party
-    )
+    person_lines <- lapply(seq_len(nrow(hh)), function(i) build_person_line(hh[i, ]))
     
     tagList(
-      tags$div(style = card_style,
-               off_target_banner,
-               tags$p(name_elements),
-               tags$p(v$DisplayAddress %||% v$Street),
-               if (housemates_line != "") tags$p(style = "font-size: 0.9em; color: #555;", housemates_line),
-               
-               tags$p(paste0(v$Age, " y.o.", " | ", party_display, " | ", "VS: ", v$VoterScore)),
-               
-               # Add previous knock info
-               {
-                 latest <- latest_contact(con, vid)
-                 has_prev_contact <- nrow(latest) > 0
-                 NULL  # Don't render anything yet
-               },
-               
-               
-               if (has_prev_contact) {
-                 lv <- function(field, fallback = NA_character_) {
-                   val <- latest[[field]]
-                   if (is.null(val) || length(val) == 0 || is.na(val) || !nzchar(val)) fallback else as.character(val)
-                 }
-                 
-                 saved_support <- lv("support_rating", "")
-                 saved_c1 <- lv("concern1", "(none)")
-                 saved_c1o <- lv("concern1_other", "")
-                 saved_c2 <- lv("concern2", "(none)")
-                 saved_c2o <- lv("concern2_other", "")
-                 saved_c3 <- lv("concern3", "(none)")
-                 saved_c3o <- lv("concern3_other", "")
-                 
-                 resolve_concern <- function(concern, other) {
-                   if (is.na(concern) || concern == "" || concern == "(none)") return(NA_character_)
-                   if (concern == "Other" && !is.na(other) && nzchar(other)) return(other)
-                   concern
-                 }
-                 
-                 c1_display <- resolve_concern(saved_c1, saved_c1o)
-                 c2_display <- resolve_concern(saved_c2, saved_c2o)
-                 c3_display <- resolve_concern(saved_c3, saved_c3o)
-                 
-                 tagList(
-                   if (saved_support != "") tags$span(style = "font-size: 0.9em; color: #666;",
-                                                      tags$em("Last support: "), saved_support,
-                                                      tags$br()),
-                   if (nzchar(c1_display)) tags$span(style = "font-size: 0.9em; color: #666;",
-                                                     tags$em("Concern #1: "), c1_display,
-                                                     tags$br()),
-                   if (nzchar(c2_display)) tags$span(style = "font-size: 0.9em; color: #666;",
-                                                     tags$em("Concern #2: "), c2_display,
-                                                     tags$br()),
-                   if (nzchar(c3_display)) tags$span(style = "font-size: 0.9em; color: #666;",
-                                                     tags$em("Concern #3: "), c3_display)
-                 )
-               },
-               
-               if (donate != "") tags$p(style = "font-size: 0.85em; color: #555;", donate),
-               if (additional != "") tags$p(style = "font-size: 0.85em; color: #555;", additional),
-               
-               tags$div(style = "text-align: center;",
-                        if (already_saved) {
-                          tags$span(class = "badge bg-success",
-                                    paste0("\u2713 Knocked ", format(as.POSIXct(saved_ts), "%m/%d %H:%M")))
-                        } else {
-                          tags$span(class = "badge bg-secondary", "Not yet recorded")
-                        }
-               )
-      ),
-      
-      tags$div(class = "mt-2", style = "text-align: center;",
-               actionLink("diff_person", 
-                          label = tags$span(class = "badge bg-danger", 
-                                            style = "cursor: pointer;",
-                                            "Different Person")),
-               actionLink("reg_to_vote",
-                          label = tags$span(class = "badge ms-2",
-                                            style = "cursor: pointer; background-color: #1B5E20; color: #FFFFFF;",
-                                            bsicons::bs_icon("pencil-square"), " Reg to Vote")),
-               actionLink("add_info",
-                          label = tags$span(class = "badge bg-primary ms-2",
-                                            style = "cursor: pointer;",
-                                            bsicons::bs_icon("plus-circle-fill"), " Add Info")),
-               actionLink("they_moved",
-                          label = tags$span(class = "badge ms-2",
-                                            style = "cursor: pointer; background-color: #D4A017; color: #FFFFFF;",
-                                            bsicons::bs_icon("box-seam"), " They Moved")),
-               if (identical(user_role(), "admin"))
-                 actionLink("new_address",
-                            label = tags$span(class = "badge bg-dark ms-2",
-                                              style = "cursor: pointer;",
-                                              bsicons::bs_icon("house-add"), " New Address"))
+      tags$div(
+        tags$p(v1$DisplayAddress %||% v1$Street),
+        tags$div(person_lines)
       )
     )
   })
