@@ -1348,9 +1348,17 @@ server <- function(input, output, session) {
     if (nrow(df) > 0 && !"DisplayAddress" %in% names(df)) {
       df$DisplayAddress <- df$Street
     }
+    
     route_data(df)
-    stop_idx <- which(df$RowID == selected_id)
-    current_stop(if (length(stop_idx) > 0) stop_idx[1] else 1L)
+    match_row <- df[df$RowID == selected_id, , drop = FALSE]
+    if (nrow(match_row) > 0) {
+      so  <- sort(unique(df$StopOrder))
+      pos <- which(so == match_row$StopOrder[1])
+      current_stop(if (length(pos) > 0) pos[1] else 1L)
+    } else {
+      current_stop(1L)
+    }
+    
     #open contact_card tab if not already open
     bslib::nav_select(id = "main_tabs", selected = "contact_card", session = session)
     
@@ -1360,7 +1368,7 @@ server <- function(input, output, session) {
   # ── Stop navigation ───────────────────────────────────────────────────
   
   observeEvent(input$prev_stop, {
-    n <- nrow(route_data())
+    n <- length(stop_orders())
     if (n < 1) return()
     cur <- current_stop()
     current_stop(if (cur > 1) cur - 1L else n)    # at first → wrap to last
@@ -1368,7 +1376,7 @@ server <- function(input, output, session) {
   })
   
   observeEvent(input$next_stop, {
-    n <- nrow(route_data())
+    n <- length(stop_orders())
     if (n < 1) return()
     cur <- current_stop()
     current_stop(if (cur < n) cur + 1L else 1L)   # at last → wrap to first
@@ -1400,7 +1408,7 @@ server <- function(input, output, session) {
   })
   
   observeEvent(input$go_stop, {
-    n <- nrow(route_data())
+    n <- length(stop_orders())
     if (n < 1) return()
     target <- suppressWarnings(as.integer(input$jump_stop))
     if (is.na(target)) return()
@@ -1408,13 +1416,36 @@ server <- function(input, output, session) {
     form_phase(1L)
   })
   
-  # ── Current voter reactive ────────────────────────────────────────────
+  # ── Current household / voter reactives ───────────────────────────────
+  # current_stop() is now a POSITION into the unique, sorted StopOrder
+  # values for this route — not a row index into route_data(). A house
+  # with 2 registered voters shares one StopOrder, so it counts as ONE
+  # stop instead of two.
   
-  current_voter <- reactive({
+  stop_orders <- reactive({
     rd <- route_data()
+    if (nrow(rd) == 0) return(integer(0))
+    sort(unique(rd$StopOrder))
+  })
+  
+  current_household <- reactive({
+    rd <- route_data()
+    so <- stop_orders()
     idx <- current_stop()
-    if (nrow(rd) == 0 || idx < 1 || idx > nrow(rd)) return(NULL)
-    rd[idx, ]
+    if (nrow(rd) == 0 || length(so) == 0 || idx < 1 || idx > length(so)) {
+      return(rd[0, ])
+    }
+    rd[rd$StopOrder == so[idx], , drop = FALSE]
+  })
+  
+  # Back-compat: anything still expecting "a single voter at this stop"
+  # (header text, they_moved, modals) reads the FIRST row of the household.
+  # This keeps every downstream single-voter house behaving exactly as
+  # before — only multi-voter houses change.
+  current_voter <- reactive({
+    hh <- current_household()
+    if (nrow(hh) == 0) return(NULL)
+    hh[1, ]
   })
   
   # ── Contact header ────────────────────────────────────────────────────
@@ -1423,7 +1454,7 @@ server <- function(input, output, session) {
     rd <- route_data()
     if (nrow(rd) == 0) return("Search for or get a route.")
     paste0("Precinct ", rd$Precinct[1], " \u2014 ", rd$RouteName[1],
-           "  |  Stop ", current_stop(), " of ", nrow(rd))
+           "  |  Stop ", current_stop(), " of ", length(stop_orders()))
   })
   
   # ── Voter info panel ──────────────────────────────────────────────────
