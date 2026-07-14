@@ -567,8 +567,8 @@ ui <- page_fluid(
                                      " by precinct + route number, or search by address or name."),
                              tags$li("Walk to the first stop. The contact card at the top shows the voter's info."),
                              tags$li("Fill out ", tags$strong("Knocking for who?"), ", ",
-                                     tags$strong("Left material?"), ", and ",
-                                     tags$strong("Were they there?"), "."),
+                                     tags$strong("Did you leave campaign material?"), ", and ",
+                                     tags$strong("Was anyone home?"), "."),
                              tags$li("If they were there, record ", tags$strong("support rating"),
                                      " and any ", tags$strong("concerns"), " that came up."),
                              tags$li("Click ", tags$strong("Save & Next"), " to move on."),
@@ -1389,10 +1389,10 @@ server <- function(input, output, session) {
     form_phase(1L)
   })
   
-  observeEvent(input$they_moved, {
-    v <- current_voter()
-    if (is.null(v)) return()
-    vid <- as.character(v$VoterId)
+  observeEvent(input$they_moved_click, {
+    payload <- input$they_moved_click
+    vid <- if (!is.null(payload)) as.character(payload$vid) else NA_character_
+    if (is.na(vid) || !nzchar(vid)) return()
     
     # DB flag
     flag_may_have_moved(con, vid)
@@ -1578,7 +1578,7 @@ server <- function(input, output, session) {
         
         prev_line <- tags$span(
           style = "font-size: 0.85em; color: #666;",
-          if (saved_support != "") tagList(tags$em("Last support: "), saved_support, "") else NULL,
+          if (saved_support != "") tagList(tags$em("Support: "), saved_support, "") else NULL,
           if (saved_support != "" && nzchar(concerns_display)) tags$br() else NULL,
           if (nzchar(concerns_display)) tagList(tags$em("Concerns: "), concerns_display) else NULL
         )
@@ -1587,6 +1587,32 @@ server <- function(input, output, session) {
       pipeline_addl  <- if (!is.null(v$Additional) && !is.na(v$Additional) && v$Additional != "") v$Additional else ""
       canvasser_addl <- get_additional_notes(con, vid)
       additional <- paste(c(pipeline_addl, canvasser_addl)[nzchar(c(pipeline_addl, canvasser_addl))], collapse = " | ")
+      saved_ts      <- if (nrow(latest) > 0) latest$contact_timestamp else NA_character_
+      already_saved <- !is.na(saved_ts) && nzchar(saved_ts)
+      
+      status_badge <- if (already_saved) {
+        tags$span(class = "badge bg-success",
+                  paste0("\u2713 ", format(as.POSIXct(saved_ts), "%m/%d %H:%M")))
+      } else {
+        tags$span(class = "badge bg-secondary", "Not yet recorded")
+      }
+      
+      action_row <- tags$div(
+        style = "margin-top: 0.3rem;",
+        status_badge,
+        tags$span(
+          class = "badge bg-primary ms-2",
+          style = "cursor: pointer;",
+          onclick = sprintf("Shiny.setInputValue('add_info_click', {vid: '%s', nonce: Math.random()}, {priority: 'event'})", vid),
+          bsicons::bs_icon("plus-circle-fill"), " Add Info"
+        ),
+        tags$span(
+          class = "badge ms-2",
+          style = "cursor: pointer; background-color: #D4A017; color: #FFFFFF;",
+          onclick = sprintf("Shiny.setInputValue('they_moved_click', {vid: '%s', nonce: Math.random()}, {priority: 'event'})", vid),
+          bsicons::bs_icon("box-seam"), " They Moved"
+        )
+      )
       
       tags$div(
         style = paste0(line_style, " border-bottom: 1px solid #E0E0E0;"),
@@ -1594,23 +1620,44 @@ server <- function(input, output, session) {
         tags$p(class = "mb-1", style = "font-size: 0.9em;",
                paste0(v$Age, " y.o.", " | ", party_display, " | ", "VS: ", v$VoterScore)),
         if (!is.null(prev_line)) tags$p(class = "mb-1", prev_line) else NULL,
-        if (nzchar(additional)) tags$p(class = "mb-0", style = "font-size: 0.85em; color: #444;", additional) else NULL
+        if (nzchar(additional)) tags$p(class = "mb-0", style = "font-size: 0.85em; color: #444;", additional) else NULL,
+        action_row
       )
     }
     
     person_lines <- lapply(seq_len(nrow(hh)), function(i) build_person_line(hh[i, ]))
     
+    is_kevin <- identical(tolower(credentials()$info$user), "kcarriere")
+    
+    shared_actions <- tags$div(
+      class = "mt-2", style = "text-align: center;",
+      actionLink("diff_person",
+                 label = tags$span(class = "badge bg-danger", style = "cursor: pointer;",
+                                   "Different Person")),
+      actionLink("reg_to_vote",
+                 label = tags$span(class = "badge ms-2",
+                                   style = "cursor: pointer; background-color: #1B5E20; color: #FFFFFF;",
+                                   bsicons::bs_icon("pencil-square"), " Reg to Vote")),
+      if (is_kevin)
+        actionLink("new_address",
+                   label = tags$span(class = "badge bg-dark ms-2",
+                                     style = "cursor: pointer;",
+                                     bsicons::bs_icon("house-add"), " New Address"))
+    )
+    
     tagList(
       tags$div(
         tags$p(v1$DisplayAddress %||% v1$Street),
         tags$div(person_lines)
-      )
+      ),
+      shared_actions
     )
   })
   
   registerVoterContactModals(
     input, output, session,
     current_voter   = current_voter,
+    current_household  = current_household,
     route_data      = route_data,
     voter_data      = voter_data,
     data_refresh    = data_refresh,
