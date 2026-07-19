@@ -161,6 +161,33 @@ flag_may_have_moved <- function(con, voter_ids) {
   invisible(TRUE)
 }
 
+flag_deceased <- function(con, voter_ids) {
+  if (length(voter_ids) == 0) return(invisible(FALSE))
+  ids <- as.character(voter_ids)
+  ids <- ids[!is.na(ids)]
+  if (length(ids) == 0) return(invisible(FALSE))
+  placeholders <- paste(rep("?", length(ids)), collapse = ", ")
+  dbExecute(con,
+            paste0("UPDATE voters SET deceased = 1 WHERE voter_id IN (", placeholders, ")"),
+            params = as.list(ids))
+  invisible(TRUE)
+}
+
+# House-level: applies to every voter currently sharing a stop, and is a
+# toggle (canvassers can undo a mis-click) rather than one-directional.
+set_no_soliciting <- function(con, voter_ids, value = 1) {
+  if (length(voter_ids) == 0) return(invisible(FALSE))
+  ids <- as.character(voter_ids)
+  ids <- ids[!is.na(ids)]
+  if (length(ids) == 0) return(invisible(FALSE))
+  placeholders <- paste(rep("?", length(ids)), collapse = ", ")
+  dbExecute(con,
+            paste0("UPDATE voters SET no_soliciting = ", as.integer(value),
+                   " WHERE voter_id IN (", placeholders, ")"),
+            params = as.list(ids))
+  invisible(TRUE)
+}
+
 voter_left_material_since <- function(con, vid, cutoff_date = "2026-07-07") {
   n <- tbl(con, "contacts") |>
     filter(voter_id == !!as.character(vid),

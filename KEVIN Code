@@ -30,6 +30,14 @@ CONTROL + C seems to be an exit command generally.
 # REQUIRES PPG# 
 ssh kevin@67.205.173.18
 
+####### CONNECT TO SQLITE
+sqlite3 /srv/shiny-server/kevin/ServerData/kevin.sqlite
+
+######## DOWNLOAD DB FROM SERVER TO LOCAL ###
+# FROM COMPUTER
+rsync -avz kevin@67.205.173.18:/srv/shiny-server/kevin/ServerData/kevin.sqlite ~/Backups/KEVIN/
+
+
 ######## SEND FILES TO SERVER FROM LOCAL #####
 ##### FIRST, CD TO THE FOLDER #####
 # a — archive mode; preserves permissions, timestamps, symlinks, owner, group. The most useful catch-all flag
@@ -54,16 +62,7 @@ sudo tail -f /var/log/shiny-server/kevin-*.log
 # CTRL+C TO EXIT
 
 
-####### CONNECT TO SQLITE
-sqlite3 /srv/shiny-server/kevin/ServerData/kevin.sqlite
 
-
-
-
-
-
-
-# REQUIRES PGG# OR SUDO?
 
 ##### REFRESH OAUTH-2 #######
 sudo systemctl restart oauth2-proxy
@@ -95,10 +94,6 @@ rsync -av --checksum --no-times \
 
 
 
-Download DB from Server to Local
-# FROM COMPUTER
-rsync -avz kevin@67.205.173.18:/srv/shiny-server/kevin/ServerData/kevin.sqlite ~/Backups/KEVIN/
-
 #gets you out of server
 exit 
 
@@ -120,6 +115,8 @@ rsync -avz Modules/voter_contact_modals.R kevin@67.205.173.18:/srv/shiny-server/
 
 
 rsync -avz Modules/voter_list_voterbase.R kevin@67.205.173.18:/srv/shiny-server/kevin/Modules/
+
+rsync -avz Functions/variables_included.R kevin@67.205.173.18:/srv/shiny-server/kevin/Functions/variables_included.R
 
 rsync -avz Functions/dtc.R kevin@67.205.173.18:/srv/shiny-server/kevin/Functions/dtc.R
 rsync -avz Modules/canvassing_scripts.R kevin@67.205.173.18:/srv/shiny-server/kevin/Modules/canvassing_scripts.R

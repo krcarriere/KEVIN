@@ -3,13 +3,13 @@ variable_list <- c(
 "VoterId", "FirstName", "LastName", "Name",
 "FirstNameUpper", "LastNameUpper", "RowID",
 # address / geo
-"Precinct", "Street",
+"Precinct",  "FullAddress", "Street",
 "StreetName", "StreetNameUpper",
 "StreetSuffix", "StreetSuffixUpper",
 "StreetNum",
 # voter attributes the UI displays
 "Age", "Party", "VoterScore", "VoterStatus", "MayHaveMoved",
-"NSSE2026Voter", "nsse_2026_voter",
+"NSSE2026Voter", "nsse_2026_voter", "Deceased", "NoSoliciting",
 # routing
 "Route", "RouteName", "StopOrder", "Scenario",
 # canvassing context produced upstream

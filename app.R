@@ -1,5 +1,3 @@
-# Testing
-
 library(shiny)
 library(bslib)
 library(DT)
@@ -146,7 +144,9 @@ voters_raw <- voters_raw |>
     DonateText       = donate_text,
     Additional       = additional,
     WhoKnows         = who_knows,
-    MayHaveMoved     = may_have_moved
+    MayHaveMoved     = may_have_moved,
+    Deceased = deceased,
+    NoSoliciting = no_soliciting
   )
 
 routes_raw <- routes_raw |>
@@ -277,10 +277,12 @@ ui <- page_fluid(
                 "Search by Street",
                 icon = bsicons::bs_icon("geo-alt"),
                 numericInput("house_num", "House number (optional)", value = NA, min = 1),
+                tags$small(class = "text-muted",
+                           "Narrows the street search, or finds the route containing this house."),
                 textInput("street_search", "Street name", placeholder = "e.g. MAPLE"),
                 selectInput("street_match", "Street", choices = c("(type above)" = "")),
                 actionButton("go_street_all", "Who's on this street?", class = "btn-secondary w-100 mt-2"),
-                actionButton("go_street_route", "Find route by house #", class = "btn-primary w-100 mt-2")
+                actionButton("go_street_route", "Jump to route at this house", class = "btn-primary w-100 mt-2")
               ),
               
               accordion_panel(
@@ -1022,7 +1024,7 @@ server <- function(input, output, session) {
   
   # ── Searching ──────────────────────────────────────────────────────────
   
-  load_route <- function(df) {
+  load_route <- function(df, focus_vid = NULL){
     
     if (nrow(df) > 0 && !"DisplayAddress" %in% names(df)) {
       df$DisplayAddress <- df$Street
@@ -1040,7 +1042,20 @@ server <- function(input, output, session) {
     }
     
     route_data(df)
-    current_stop(1L)
+    
+    if (!is.null(focus_vid) && nrow(df) > 0) {
+      match_row <- df[df$VoterId == focus_vid, , drop = FALSE]
+      if (nrow(match_row) > 0 && !is.na(match_row$StopOrder[1])) {
+        so  <- sort(unique(df$StopOrder))
+        pos <- which(so == match_row$StopOrder[1])
+        current_stop(if (length(pos) > 0) pos[1] else 1L)
+      } else {
+        current_stop(1L)
+      }
+    } else {
+      current_stop(1L)
+    }
+    
     form_phase(1L)
   }
   
@@ -1115,7 +1130,6 @@ server <- function(input, output, session) {
     }
   })
   
-  
   observeEvent(input$go_street_all, {
     sel <- input$street_match
     if (is.null(sel) || sel == "") return()
@@ -1127,61 +1141,45 @@ server <- function(input, output, session) {
     v <- voter_data()
     street_df <- v %>%
       dplyr::filter(StreetNameUpper == target_name,
-                    StreetSuffixUpper == target_suffix) %>%
-      dplyr::arrange(StreetNum)
+                    StreetSuffixUpper == target_suffix)
     
     if (nrow(street_df) == 0) {
-      # fall back to voters_raw
       street_df <- voters_raw %>%
         dplyr::filter(StreetNameUpper == target_name,
-                      StreetSuffixUpper == target_suffix) %>%
-        dplyr::arrange(StreetNum)
+                      StreetSuffixUpper == target_suffix)
     }
     
     if (nrow(street_df) == 0) {
       header_text(paste0("No voters found on ", target_name, " ", target_suffix))
       load_route(tibble::tibble())
+      return()
+    }
+    
+    street_df <- street_df %>% dplyr::arrange(StreetNum)
+    target_num <- suppressWarnings(as.integer(input$house_num))
+    
+    if (!is.na(target_num)) {
+      at_or_above <- street_df %>% dplyr::filter(StreetNum >= target_num)
+      if (nrow(at_or_above) > 0) {
+        nearest_num <- min(at_or_above$StreetNum)
+        match_note <- if (nearest_num == target_num) "exact match" else paste0("nearest above \u2014 ", nearest_num)
+      } else {
+        nearest_num <- max(street_df$StreetNum, na.rm = TRUE)
+        match_note <- paste0("none at/above; nearest available \u2014 ", nearest_num)
+      }
+      street_df <- street_df %>% dplyr::filter(StreetNum == nearest_num)
+      header_text(paste0(target_num, " ", target_name, " ", target_suffix,
+                         " \u2014 ", match_note, " (", nrow(street_df), " voters)"))
     } else {
       header_text(paste0(target_name, " ", target_suffix,
                          " \u2014 ", nrow(street_df), " voters"))
-      load_route(street_df)
     }
+    
+    street_df <- street_df %>%
+      dplyr::mutate(StopOrder = dplyr::dense_rank(Street))   # re-derive: don't reuse each voter's original route StopOrder
+    
+    load_route(street_df)
   })
-  
-# New version to catch new voter adds, but blew up stuff.
-  
-    # observeEvent(input$go_street_all, {
-  #   sel <- input$street_match
-  #   if (is.null(sel) || sel == "") return()
-  #   
-  #   parts <- strsplit(sel, "\\|")[[1]]
-  #   target_name   <- parts[1]
-  #   target_suffix <- parts[2]
-  #   
-  #   # Scenario voters on this street — carry full route context.
-  #   in_scen <- voter_data() %>%
-  #     dplyr::filter(StreetNameUpper == target_name,
-  #                   StreetSuffixUpper == target_suffix)
-  #   
-  #   # Everyone else on the street within the user's scope: off-scenario
-  #   # voters AND newly added contacts, pulled from the full base.
-  #   extra <- searchable_voters() %>%
-  #     dplyr::filter(StreetNameUpper == target_name,
-  #                   StreetSuffixUpper == target_suffix,
-  #                   !(VoterId %in% in_scen$VoterId))
-  #   
-  #   street_df <- dplyr::bind_rows(in_scen, extra) %>%
-  #     dplyr::arrange(StreetNum)
-  #   
-  #   if (nrow(street_df) == 0) {
-  #     header_text(paste0("No voters found on ", target_name, " ", target_suffix))
-  #     load_route(tibble::tibble())
-  #   } else {
-  #     header_text(paste0(target_name, " ", target_suffix,
-  #                        " \u2014 ", nrow(street_df), " on street"))
-  #     load_route(street_df)
-  #   }
-  # })
   
   observeEvent(input$go_street_route, {
     sel <- input$street_match
@@ -1250,9 +1248,11 @@ server <- function(input, output, session) {
       df <- v %>%
         dplyr::filter(Precinct == matched_precinct, Route == matched_route) %>%
         dplyr::arrange(StopOrder)
+      total_stops <- length(unique(df$StopOrder))
+      matched_stop_pos <- which(sort(unique(df$StopOrder)) == person$StopOrder[1])
       header_text(paste0(label, " \u2192 ", person$RouteName[1],
-                         "  (", nrow(df), " voters)"))
-      load_route(df)
+                         "  (stop ", matched_stop_pos, " of ", total_stops, ")"))
+      load_route(df, focus_vid = matched_vid)
     }
   })
 
@@ -1412,7 +1412,54 @@ server <- function(input, output, session) {
     data_refresh(data_refresh() + 1)
     showNotification("Marked as may have moved.", type = "message")
   })
+ 
+  observeEvent(input$deceased_click, {
+    payload <- input$deceased_click
+    vid <- if (!is.null(payload)) as.character(payload$vid) else NA_character_
+    if (is.na(vid) || !nzchar(vid)) return()
+    
+    flag_deceased(con, vid)
+    
+    vr <- get("voters_raw", envir = globalenv())
+    vr$Deceased[vr$VoterId == vid] <- 1L
+    assign("voters_raw", vr, envir = globalenv())
+    
+    rd <- route_data()
+    if (nrow(rd) > 0) {
+      rd$Deceased[rd$VoterId == vid] <- 1L
+      route_data(rd)
+    }
+    
+    data_refresh(data_refresh() + 1)
+    showNotification("Marked as deceased.", type = "message")
+  })
   
+  observeEvent(input$toggle_no_soliciting, {
+    hh <- current_household()
+    if (nrow(hh) == 0) return()
+    
+    new_val <- if (isTRUE(any(hh$NoSoliciting == 1, na.rm = TRUE))) 0L else 1L
+    ids <- as.character(hh$VoterId)
+    
+    set_no_soliciting(con, ids, value = new_val)
+    
+    vr <- get("voters_raw", envir = globalenv())
+    vr$NoSoliciting[vr$VoterId %in% ids] <- new_val
+    assign("voters_raw", vr, envir = globalenv())
+    
+    rd <- route_data()
+    if (nrow(rd) > 0) {
+      rd$NoSoliciting[rd$VoterId %in% ids] <- new_val
+      route_data(rd)
+    }
+    
+    data_refresh(data_refresh() + 1)
+    showNotification(
+      if (new_val == 1L) "Marked No Soliciting / No Trespassing." else "Cleared No Soliciting flag.",
+      type = "message"
+    )
+  })
+   
   observeEvent(input$go_stop, {
     n <- length(stop_orders())
     if (n < 1) return()
@@ -1487,7 +1534,18 @@ server <- function(input, output, session) {
       off_target_note <- if (is_off_target) {
         tags$span(style = "font-size: 0.8em; color: #8B6F00;", tags$em("(Off Route)"))
       } else NULL
-      name_elements <- list(tags$strong(v$Name))
+      name_elements <- list(
+        if (isTRUE(v$Deceased == 1)) {
+          tags$strong(style = "text-decoration: line-through; color: #6E120B;", v$Name)
+        } else {
+          tags$strong(v$Name)
+        }
+      )
+      if (isTRUE(v$Deceased == 1)) {
+        name_elements <- c(name_elements, list(
+          tags$span(class = "ms-2", style = "color: #6E120B; font-size: 0.85em;", tags$em("(deceased)"))
+        ))
+      }
       
       who <- if (!is.null(v$WhoKnows) && !is.na(v$WhoKnows) && v$WhoKnows != "") v$WhoKnows else ""
       if (who != "") {
@@ -1611,7 +1669,16 @@ server <- function(input, output, session) {
           style = "cursor: pointer; background-color: #D4A017; color: #FFFFFF;",
           onclick = sprintf("Shiny.setInputValue('they_moved_click', {vid: '%s', nonce: Math.random()}, {priority: 'event'})", vid),
           bsicons::bs_icon("box-seam"), " They Moved"
-        )
+        ) 
+        
+        # Deceased badge
+         # ),
+        # tags$span(
+        #   class = "badge ms-2",
+        #   style = "cursor: pointer; background-color: #6E120B; color: #FFFFFF;",
+        #   onclick = sprintf("Shiny.setInputValue('deceased_click', {vid: '%s', nonce: Math.random()}, {priority: 'event'})", vid),
+        #   bsicons::bs_icon("flower1"), " Deceased"
+        # )
       )
       
       tags$div(
@@ -1628,6 +1695,7 @@ server <- function(input, output, session) {
     person_lines <- lapply(seq_len(nrow(hh)), function(i) build_person_line(hh[i, ]))
     
     is_kevin <- identical(tolower(credentials()$info$user), "kcarriere")
+    house_flagged <- isTRUE(any(hh$NoSoliciting == 1, na.rm = TRUE))
     
     shared_actions <- tags$div(
       class = "mt-2", style = "text-align: center;",
@@ -1638,6 +1706,10 @@ server <- function(input, output, session) {
                  label = tags$span(class = "badge ms-2",
                                    style = "cursor: pointer; background-color: #1B5E20; color: #FFFFFF;",
                                    bsicons::bs_icon("pencil-square"), " Reg to Vote")),
+      actionButton("toggle_no_soliciting",
+                   label = if (house_flagged) "Clear No Soliciting" else "Mark No Soliciting",
+                   class = if (house_flagged) "btn-outline-danger btn-sm ms-2" else "btn-outline-secondary btn-sm ms-2"),
+      
       if (is_kevin)
         actionLink("new_address",
                    label = tags$span(class = "badge bg-dark ms-2",
@@ -1645,8 +1717,23 @@ server <- function(input, output, session) {
                                      bsicons::bs_icon("house-add"), " New Address"))
     )
     
+    stamp <- if (house_flagged) {
+      tags$div(
+        style = "position: absolute; top: 45%; left: 50%;
+                  transform: translate(-50%, -50%) rotate(-12deg);
+                  border: 4px solid #6E120B; color: #6E120B;
+                  font-weight: 900; font-size: 1.6em; letter-spacing: 2px;
+                  padding: 0.2em 0.6em; text-transform: uppercase;
+                  background: rgba(255,255,255,0.75); pointer-events: none;
+                  z-index: 10; white-space: nowrap;",
+        "No Soliciting / No Trespassing"
+      )
+    } else NULL
+    
     tagList(
       tags$div(
+        style = "position: relative;",
+        stamp,
         tags$p(v1$DisplayAddress %||% v1$Street),
         tags$div(person_lines)
       ),
