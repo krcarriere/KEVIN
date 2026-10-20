@@ -90,10 +90,9 @@ win_targets <- list(
 )
 
 scenario_access <- list(
-  admin = c("NSDem", "NSInd", "NSDandI", "NSAll", "D17Dem", "D17Ind", "D17DandI", "Pawtucket",
-            "D49Dem", "D49Ind", "D49DandI", "KevinOnly", "KevinOrDonor"),
-  ns    = c("NSDem", "NSInd", "NSDandI", "NSAll", "KevinOnly", "KevinOrDonor"),
-  sb    = c("NSDem", "NSInd", "NSDandI", "NSAll"),
+  admin = c("NSDandI","MailBallots", "NSDem", "NSInd", "NSAll", "KevinOnly", "KevinOrDonor"),
+  ns    = c("NSDandI","MailBallots", "NSDem", "NSInd", "NSAll"),
+  sb    = c("NSDandI","MailBallots", "NSDem", "NSInd", "NSAll"),
   d17   = c("D17Dem", "D17Ind", "D17DandI"),
   d49   = c("D49Dem", "D49Ind", "D49DandI"),
   paw = c("Pawtucket")

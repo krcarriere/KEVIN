@@ -27,6 +27,23 @@ close_db <- function(con) {
 # READ HELPERS
 # ══════════════════════════════════════════════════════════════════════════
 
+# Whether a voter has a turnout record for a given election. Live query —
+# reflects the most recent voter_turnout import with no restart needed.
+voted_in_election <- function(con, vid, election) {
+  n <- DBI::dbGetQuery(con,
+                       "SELECT COUNT(*) AS n FROM voter_turnout WHERE voter_id = ? AND election = ?",
+                       params = list(vid, election))$n
+  isTRUE(n > 0)
+}
+
+# Whether a voter has a mail ballot request on file for a given election.
+requested_mail_ballot <- function(con, vid, election) {
+  n <- DBI::dbGetQuery(con,
+                       "SELECT COUNT(*) AS n FROM voter_mail_ballot WHERE voter_id = ? AND election = ?",
+                       params = list(vid, election))$n
+  isTRUE(n > 0)
+}
+
 # Latest contact row for one voter (0 or 1 row returned).
 latest_contact <- function(con, vid) {
   tbl(con, "contacts") |>
@@ -158,33 +175,6 @@ flag_may_have_moved <- function(con, voter_ids) {
     paste0("UPDATE voters SET may_have_moved = 1 WHERE voter_id IN (",
            placeholders, ")"),
     params = as.list(ids))
-  invisible(TRUE)
-}
-
-flag_deceased <- function(con, voter_ids) {
-  if (length(voter_ids) == 0) return(invisible(FALSE))
-  ids <- as.character(voter_ids)
-  ids <- ids[!is.na(ids)]
-  if (length(ids) == 0) return(invisible(FALSE))
-  placeholders <- paste(rep("?", length(ids)), collapse = ", ")
-  dbExecute(con,
-            paste0("UPDATE voters SET deceased = 1 WHERE voter_id IN (", placeholders, ")"),
-            params = as.list(ids))
-  invisible(TRUE)
-}
-
-# House-level: applies to every voter currently sharing a stop, and is a
-# toggle (canvassers can undo a mis-click) rather than one-directional.
-set_no_soliciting <- function(con, voter_ids, value = 1) {
-  if (length(voter_ids) == 0) return(invisible(FALSE))
-  ids <- as.character(voter_ids)
-  ids <- ids[!is.na(ids)]
-  if (length(ids) == 0) return(invisible(FALSE))
-  placeholders <- paste(rep("?", length(ids)), collapse = ", ")
-  dbExecute(con,
-            paste0("UPDATE voters SET no_soliciting = ", as.integer(value),
-                   " WHERE voter_id IN (", placeholders, ")"),
-            params = as.list(ids))
   invisible(TRUE)
 }
 
@@ -354,4 +344,32 @@ get_same_door_voters <- function(v, rd) {
       Street == v$Street
     ) |>
     dplyr::arrange(LastName, FirstName)
+}
+
+voted_general_ids <- function(con) {
+  dbGetQuery(con, "SELECT voter_id FROM voter_turnout WHERE election = 'General2026'")$voter_id
+}
+
+
+
+get_address_signs <- function(con, full_address) {
+  if (is.null(full_address) || !nzchar(full_address)) return(character(0))
+  dbGetQuery(con,
+             "SELECT sign_code FROM address_signs WHERE full_address = ?",
+             params = list(full_address)
+  )$sign_code
+}
+
+set_address_signs <- function(con, full_address, sign_names, updated_by) {
+  ts <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
+  dbWithTransaction(con, {
+    dbExecute(con, "DELETE FROM address_signs WHERE full_address = ?",
+              params = list(full_address))
+    for (nm in sign_names) {
+      dbExecute(con,
+                "INSERT INTO address_signs (full_address, sign_code, updated_by, updated_at)
+         VALUES (?, ?, ?, ?)",
+                params = list(full_address, nm, updated_by, ts))
+    }
+  })
 }
