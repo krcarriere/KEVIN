@@ -1,9 +1,0 @@
-
-# backup first (path.expand because R doesn't expand ~ on its own)
-file.copy("ServerData/kevin.sqlite", path.expand(paste0("~/kevin_pre_contacttype_", Sys.Date(), ".sqlite")))
-
-con <- dbConnect(SQLite(), "ServerData/kevin.sqlite")
-dbExecute(con, "ALTER TABLE contacts ADD COLUMN contact_type TEXT;")
-dbGetQuery(con, "PRAGMA table_info(contacts);")$name   # confirm contact_type is in the list
-dbDisconnect(con)
-
